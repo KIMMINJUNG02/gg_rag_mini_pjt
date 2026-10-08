@@ -13,8 +13,8 @@ from common.config import (
 def get_llm_model(
     model: str = MODEL,
     api_key: str = API_KEY,
-    temperature: float = 0,
-    max_tokens: int = 512
+    temperature: float = TEMPERATURE,
+    max_tokens: int = MAX_TOKENS
 ):
     return ChatOpenAI(
         model=MODEL,

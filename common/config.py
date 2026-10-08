@@ -22,3 +22,5 @@ QDRANT_URL = os.getenv(
     "QDRANT_URL",
     "http://localhost:6333"
 )
+
+LAW_API_KEY = os.getenv("LAW_API_KEY")
