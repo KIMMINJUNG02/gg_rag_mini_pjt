@@ -240,3 +240,23 @@ from common.qdrant import get_qdrant_client
 ```
 
 > `common/`의 코드를 수정한 뒤에는 커널만 재시작하면 되고, `uv sync`를 다시 실행할 필요는 없다 (editable 설치이므로 소스 변경이 즉시 반영된다).
+
+---
+
+## 11. Retriever 평가 결과
+
+[`eval/golden_set.jsonl`](eval/golden_set.jsonl)의 질문 25개를 대상으로 검색 결과를 평가했다. 각 질문에는 정답 청크 ID가 1개씩 지정되어 있다. `fetch_k=20`, `lambda_mult=0.5` 조건에서 상위 1·3·5개 결과의 Recall, Hit, MRR을 계산했다. 아래의 재정렬 적용 여부는 결과 폴더 이름(`rerankO`, `rerankX`)을 따른다.
+
+| 검색 방식 | Recall@1 / Hit@1 | MRR@1 | Recall@3 / Hit@3 | MRR@3 | Recall@5 / Hit@5 | MRR@5 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| MMR (`rerankX`) | 0.72 | 0.72 | 0.76 | 0.74 | 0.92 | 0.778 |
+| MMR + 재정렬 (`rerankO`) | **0.84** | **0.84** | **0.92** | **0.88** | 0.92 | **0.88** |
+
+재정렬을 적용한 결과, 정답 청크가 1위에 나타난 비율은 72%에서 84%로, 상위 3개 안에 나타난 비율은 76%에서 92%로 높아졌다. 상위 5개 안에 정답이 나타난 비율은 두 방식 모두 92%다. 정답 청크가 질문마다 1개이므로 이 평가에서는 Recall@k와 Hit@k가 같다. MRR@k는 첫 번째 정답 청크의 순위가 높을수록 커진다.
+
+이 수치는 **검색 단계의 성능**을 평가한 결과이며, 챗봇이 생성한 최종 답변의 정확도를 뜻하지는 않는다.
+
+| 방식 | 요약 | 질문별 상세 |
+| --- | --- | --- |
+| 재정렬 적용 | [summary.json](<evaluation_results(rerankO)/summary.json>) | [details.jsonl](<evaluation_results(rerankO)/details.jsonl>) |
+| 재정렬 미적용 | [summary.json](<evaluation_results(rerankX)/summary.json>) | [details.jsonl](<evaluation_results(rerankX)/details.jsonl>) |

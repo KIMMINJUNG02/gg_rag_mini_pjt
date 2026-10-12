@@ -1,0 +1,14 @@
+{
+  "num_questions": 25,
+  "fetch_k": 20,
+  "lambda_mult": 0.5,
+  "Recall@1": 0.84,
+  "Hit@1": 0.84,
+  "MRR@1": 0.84,
+  "Recall@3": 0.92,
+  "Hit@3": 0.92,
+  "MRR@3": 0.88,
+  "Recall@5": 0.92,
+  "Hit@5": 0.92,
+  "MRR@5": 0.88
+}

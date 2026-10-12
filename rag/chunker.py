@@ -1,166 +1,268 @@
-"""Docling HybridChunker 설정과 청크 메타데이터 정규화."""
-
-from collections.abc import Iterable
 import re
-
-import tiktoken
-from docling.chunking import HybridChunker
-from docling_core.transforms.chunker.tokenizer.openai import OpenAITokenizer
+import xml.etree.ElementTree as ET
 from langchain_core.documents import Document
+from .loader import data_load
+from common.config import EMBEDDING_MODEL
+import tiktoken
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+# ---------------------------------------------------------
+# 1. XML 파싱
+# ---------------------------------------------------------
+response = data_load()
+root = ET.fromstring(response.content)
+
+def clean(value):
+    return (value or "").strip()
+
+def get_text(element, tag):
+    return clean(element.findtext(tag))
+
+law_name = get_text(root, ".//법령명_한글")
+law_id = get_text(root, ".//법령ID")
+effective_date = get_text(root, ".//시행일자")
 
 
-EMBED_MODEL_NAME = "text-embedding-3-small"
-MAX_TOKENS = 700
-ARTICLE_HEADING_PATTERN = re.compile(r"제\d+조(?:의\d+)?\([^)\n]+\)")
-STRUCTURE_HEADING_PATTERN = re.compile(r"^제\d+(?:장|절)\s")
+# ---------------------------------------------------------
+# 2. 장·절 판별 패턴
+# ---------------------------------------------------------
+chapter_pattern = re.compile(r"^제\s*\d+(?:의\d+)?장(?:\s|$)")
+section_pattern = re.compile(r"^제\s*\d+(?:의\d+)?절(?:\s|$)")
+
+current_chapter = ""
+current_section = ""
+
+raw_chunks = []
 
 
-def create_tokenizer(
-    model_name: str = EMBED_MODEL_NAME,
-    max_tokens: int = MAX_TOKENS,
-) -> OpenAITokenizer:
-    """임베딩 모델의 토큰 규칙을 사용하는 Docling tokenizer를 만든다."""
-    encoding = tiktoken.encoding_for_model(model_name)
-    return OpenAITokenizer(tokenizer=encoding, max_tokens=max_tokens)
+# ---------------------------------------------------------
+# 3. 조문번호 구성
+# 예: 1 + 가지번호 2 -> 제1조의2
+# ---------------------------------------------------------
+def make_article_label(article):
+    no = get_text(article, "조문번호")
+    sub_no = get_text(article, "조문가지번호")
+    title = get_text(article, "조문제목")
+
+    label = f"제{no}조"
+
+    if sub_no and sub_no.isdigit() and int(sub_no) != 0:
+        label += f"의{int(sub_no)}"
+
+    if title:
+        label += f"({title})"
+
+    return label
 
 
-def create_chunker(
-    model_name: str = EMBED_MODEL_NAME,
-    max_tokens: int = MAX_TOKENS,
-) -> HybridChunker:
-    """표 머리글과 문서 구조를 보존하는 HybridChunker를 만든다."""
-    return HybridChunker(
-        tokenizer=create_tokenizer(model_name=model_name, max_tokens=max_tokens),
-        merge_peers=True,
-        repeat_table_header=True,
-    )
+# ---------------------------------------------------------
+# 4. 조문내용에서 제목 중복 제거
+# ---------------------------------------------------------
+def remove_article_heading(text, article_label):
+    text = clean(text)
+
+    if text.startswith(article_label):
+        return text[len(article_label):].strip()
+
+    return text
 
 
-def extract_pages(dl_meta: dict) -> list[int]:
-    """Docling provenance에서 청크가 포함된 PDF 페이지 번호를 추출한다."""
-    pages: set[int] = set()
-    for item in dl_meta.get("doc_items", []):
-        for provenance in item.get("prov", []):
-            page_no = provenance.get("page_no")
-            if page_no is not None:
-                pages.add(int(page_no))
-    return sorted(pages)
+# ---------------------------------------------------------
+# 5. LangChain Document 생성 함수
+# ---------------------------------------------------------
+def add_document(
+    article,
+    content,
+    paragraph_no="",
+    item_no="",
+    subitem_no=""
+):
+    content = clean(content)
 
+    if not content:
+        return
 
-def normalize_document(
-    document: Document,
-    chunk_id: int,
-    *,
-    tokenizer: OpenAITokenizer | None = None,
-) -> Document:
-    """중첩된 Docling metadata를 Qdrant payload에 적합하게 평탄화한다."""
-    tokenizer = tokenizer or create_tokenizer()
-    dl_meta = document.metadata.get("dl_meta", {})
-    pages = extract_pages(dl_meta)
-    headings = dl_meta.get("headings") or []
-    captions = dl_meta.get("captions") or []
+    article_label = make_article_label(article)
 
-    return Document(
-        page_content=document.page_content,
-        metadata={
-            "source": str(document.metadata.get("source", "")),
-            "chunk_id": chunk_id,
-            "page": pages[0] if pages else -1,
-            "pages": ",".join(map(str, pages)),
-            "heading": " > ".join(map(str, headings)),
-            "caption": " | ".join(map(str, captions)),
-            "num_tokens": tokenizer.count_tokens(document.page_content),
-            "parser": "docling",
-            "chunker": "HybridChunker",
-        },
-    )
-
-
-def normalize_documents(documents: Iterable[Document]) -> list[Document]:
-    """문서를 정규화하고 검색용 조문 문맥을 보강한다.
-
-    원본 순서로 chunk_id를 먼저 부여하므로 표지·목차를 제외해도 본문
-    chunk_id는 기존 Golden Set과 동일하게 유지된다.
-    """
-    document_tokenizer = create_tokenizer()
-    normalized_documents = [
-        normalize_document(document, chunk_id, tokenizer=document_tokenizer)
-        for chunk_id, document in enumerate(documents, start=1)
+    hierarchy = [
+        law_name,
+        current_chapter,
+        current_section,
+        article_label,
+        content
     ]
-    searchable_documents: list[Document] = []
-    current_article = ""
 
-    for document in normalized_documents:
-        if is_front_matter_or_toc(document):
-            continue
-
-        text = document.page_content
-        article_matches = list(ARTICLE_HEADING_PATTERN.finditer(text))
-        explicit_articles = [match.group(0) for match in article_matches]
-
-        should_repeat_article = bool(current_article) and (
-            not article_matches
-            or has_substantive_text_before(text, article_matches[0].start())
-        )
-        if should_repeat_article:
-            text = f"[관련 조문: {current_article}]\n{text}"
-
-        article_context = []
-        if should_repeat_article:
-            article_context.append(current_article)
-        article_context.extend(explicit_articles)
-        article_context = list(dict.fromkeys(article_context))
-
-        metadata = {
-            **document.metadata,
-            "articles": " | ".join(article_context),
-            "num_tokens": document_tokenizer.count_tokens(text),
-        }
-        searchable_documents.append(
-            Document(page_content=text, metadata=metadata)
-        )
-
-        if explicit_articles:
-            current_article = explicit_articles[-1]
-
-    return searchable_documents
-
-
-def has_substantive_text_before(text: str, first_article_start: int) -> bool:
-    """첫 조문 제목 앞에 이전 조문의 본문이 이어지는지 확인한다."""
-    prefix = text[:first_article_start]
-    for line in prefix.splitlines():
-        cleaned = line.strip().lstrip("-").strip()
-        if not cleaned or STRUCTURE_HEADING_PATTERN.match(cleaned):
-            continue
-        return True
-    return False
-
-
-def is_front_matter_or_toc(document: Document) -> bool:
-    """법률 표지와 본문 없는 목차 청크를 검색 대상에서 제외한다."""
-    text = document.page_content.strip()
-    article_headings = ARTICLE_HEADING_PATTERN.findall(text)
-
-    is_cover = (
-        "[시행 " in text
-        and "법률 제" in text
-        and not article_headings
-        and "제1조(" not in text
+    page_content = "\n".join(
+        value for value in hierarchy if value
     )
 
-    # 목차는 여러 조문 제목을 나열하지만 제목 뒤에 같은 줄의 본문이 없다.
-    has_article_body = bool(
-        re.search(
-            r"제\d+조(?:의\d+)?\([^)\n]+\)[ \t]+"
-            r"(?!제\d+조(?:의\d+)?\()\S",
-            text,
+    raw_chunks.append(
+        Document(
+            page_content=page_content,
+            metadata={
+                "law_name": law_name,
+                "law_id": law_id,
+                "chapter": current_chapter,
+                "section": current_section,
+                "article_no": get_text(article, "조문번호"),
+                "article_sub_no": get_text(article, "조문가지번호"),
+                "article_title": get_text(article, "조문제목"),
+                "paragraph_no": paragraph_no,
+                "item_no": item_no,
+                "subitem_no": subitem_no,
+                "source": "law_api"
+            }
         )
     )
-    is_toc = len(article_headings) >= 2 and not has_article_body
-    return is_cover or is_toc
 
 
-# 노트북처럼 설정 객체를 직접 가져다 쓸 수 있도록 기본 인스턴스를 제공한다.
-tokenizer = create_tokenizer()
-chunker = create_chunker()
+# ---------------------------------------------------------
+# 6. 조문단위 순서대로 처리
+# ---------------------------------------------------------
+def set_doc():
+    for article in root.findall(".//조문단위"):
+
+        article_type = get_text(article, "조문여부")
+        article_content = get_text(article, "조문내용")
+
+        # -----------------------------------------------------
+        # 6-1. 장·절 정보 처리
+        # -----------------------------------------------------
+        if article_type == "전문":
+
+            if chapter_pattern.match(article_content):
+                current_chapter = article_content
+                current_section = ""
+
+            elif section_pattern.match(article_content):
+                current_section = article_content
+
+            continue
+
+        # 실제 조문만 Document로 변환
+        if article_type != "조문":
+            continue
+
+        article_label = make_article_label(article)
+
+        # 제목을 제외한 실제 조문 본문
+        article_intro = remove_article_heading(
+            article_content,
+            article_label
+        )
+
+        # -----------------------------------------------------
+        # 6-2. 항 처리
+        # -----------------------------------------------------
+        paragraphs = article.findall("./항")
+
+        # 항이 없으면 조 단위 Document 생성
+        if not paragraphs:
+            add_document(
+                article=article,
+                content=article_intro or article_content
+            )
+            continue
+
+        for paragraph in paragraphs:
+
+            paragraph_no = get_text(paragraph, "항번호")
+            paragraph_content = get_text(paragraph, "항내용")
+
+            # 항내용이 없는 경우 조문 본문을 상위 문맥으로 사용
+            parent_content = "\n".join(
+                part for part in [
+                    article_intro,
+                    paragraph_content
+                ]
+                if part
+            )
+
+            # -------------------------------------------------
+            # 6-3. 호 처리
+            # -------------------------------------------------
+            items = paragraph.findall("./호")
+
+            if not items:
+                add_document(
+                    article=article,
+                    content=parent_content,
+                    paragraph_no=paragraph_no
+                )
+                continue
+
+            for item in items:
+
+                item_no = get_text(item, "호번호")
+                item_content = get_text(item, "호내용")
+
+                item_context = "\n".join(
+                    part for part in [
+                        parent_content,
+                        item_content
+                    ]
+                    if part
+                )
+
+                # ---------------------------------------------
+                # 6-4. 목 처리
+                # ---------------------------------------------
+                subitems = item.findall("./목")
+
+                if not subitems:
+                    add_document(
+                        article=article,
+                        content=item_context,
+                        paragraph_no=paragraph_no,
+                        item_no=item_no
+                    )
+                    continue
+
+                for subitem in subitems:
+
+                    subitem_no = get_text(subitem, "목번호")
+                    subitem_content = get_text(subitem, "목내용")
+
+                    full_content = "\n".join(
+                        part for part in [
+                            item_context,
+                            subitem_content
+                        ]
+                        if part
+                    )
+
+                    add_document(
+                        article=article,
+                        content=full_content,
+                        paragraph_no=paragraph_no,
+                        item_no=item_no,
+                        subitem_no=subitem_no
+                    )
+
+def text_split():
+    set_doc()
+    tokenizer = tiktoken.encoding_for_model(EMBEDDING_MODEL)
+
+    text_splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
+        model_name=EMBEDDING_MODEL,
+        chunk_size=512,
+        chunk_overlap=50,
+        separators=["\n\n", "\n", ". ", " ", ""]
+    )
+    final_chunks = []
+
+    for doc in raw_chunks:
+        token_count = len(tokenizer.encode(doc.page_content))
+
+        if token_count <= 512:
+            # 기존 계층 구조 유지
+            final_chunks.append(doc)
+        else:
+            # 긴 Document만 추가 분할
+            split_docs = text_splitter.split_documents([doc])
+            final_chunks.extend(split_docs)
+    
+    for i, doc in enumerate(final_chunks):
+        doc.metadata["chunk_id"] = f"law_chunk_{i:05d}"
+    
+    return final_chunks

@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f8f7f4" />
+    <meta name="description" content="인공지능 기본법 시행령의 저장된 법령 문서를 검색해 근거와 함께 답변합니다." />
+    <title>AI 기본법 시행령 안내</title>
+    <link rel="stylesheet" href="/static/styles.css?v=markdown-1" />
+    <script src="/static/app.js?v=markdown-1" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="서비스 안내">
+        <a class="brand" href="/" aria-label="AI 기본법 시행령 안내 홈">
+          <span class="brand-mark" aria-hidden="true">§</span>
+          <span class="brand-copy"><strong>법령의 맥락</strong><small>AI LAW ASSISTANT</small></span>
+        </a>
+
+        <div class="sidebar-section">
+          <span class="eyebrow">REFERENCE</span>
+          <div class="document-card">
+            <span class="document-icon" aria-hidden="true">▤</span>
+            <div>
+              <strong>검토 중인 문서</strong>
+              <p>인공지능 발전과 신뢰 기반 조성 등에 관한 기본법 시행령</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="sidebar-section examples-section">
+          <span class="eyebrow">QUICK QUESTIONS</span>
+          <h2>이런 내용을 물어보세요</h2>
+          <div class="example-list">
+            <button type="button" class="example" data-question="인공지능 학습용데이터의 품질관리는 어떻게 해야 하나요?">
+              <span>01</span><span>학습용데이터의 품질관리는 어떻게 해야 하나요?</span><span aria-hidden="true">↗</span>
+            </button>
+            <button type="button" class="example" data-question="인공지능사업자는 어떤 정보를 이용자에게 제공해야 하나요?">
+              <span>02</span><span>이용자에게 제공해야 하는 정보는 무엇인가요?</span><span aria-hidden="true">↗</span>
+            </button>
+            <button type="button" class="example" data-question="고영향 인공지능에 관한 의무는 무엇인가요?">
+              <span>03</span><span>고영향 인공지능의 의무는 무엇인가요?</span><span aria-hidden="true">↗</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="sidebar-foot">
+          <span class="foot-line"></span>
+          <p>저장된 법령 문서를 검색하고,<br />답변과 함께 근거를 보여줍니다.</p>
+        </div>
+      </aside>
+
+      <main class="main-panel">
+        <header class="topbar">
+          <div class="topbar-title"><span class="topbar-mobile-mark" aria-hidden="true">§</span> 시행령 질의응답 <span class="topbar-divider"></span> <span class="topbar-subtitle">법령 근거 확인</span></div>
+          <button id="clear-button" class="clear-button" type="button" aria-label="대화 내용 지우기">새 대화 <span aria-hidden="true">↺</span></button>
+        </header>
+
+        <div class="chat-layout">
+          <section id="conversation" class="conversation" aria-label="대화 내용" aria-live="polite">
+            <div id="welcome" class="welcome">
+              <span class="welcome-kicker"><span class="kicker-dot"></span> EVIDENCE FIRST</span>
+              <div class="welcome-symbol" aria-hidden="true"><span>§</span></div>
+              <h1>법령에서 답을 찾는<br /><em>가장 명확한 방법.</em></h1>
+              <p>인공지능 기본법 시행령에 관해 질문해 주세요.<br />관련 조문을 찾아 출처와 함께 답변합니다.</p>
+              <div class="welcome-hint"><span aria-hidden="true">✦</span> 질문은 각각 독립적으로 검색됩니다.</div>
+            </div>
+            <div id="messages" class="messages"></div>
+          </section>
+
+          <div class="composer-wrap">
+            <div id="error-message" class="error-message" role="alert" hidden></div>
+            <form id="chat-form" class="composer">
+              <label class="sr-only" for="question">질문 입력</label>
+              <textarea id="question" name="question" rows="1" maxlength="2000" placeholder="인공지능 기본법 시행령에 대해 질문해 주세요" required></textarea>
+              <button id="send-button" class="send-button" type="submit" aria-label="질문 보내기">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 12h15m-6-6 6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
+              </button>
+            </form>
+            <p class="composer-note">AI가 생성한 답변입니다. 중요한 판단 전에는 표시된 원문을 확인하세요. <span id="character-count">0 / 2000</span></p>
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

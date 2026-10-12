@@ -1,90 +1,62 @@
-"""Qdrant collection 연결 및 문서 인덱싱."""
-
-from collections.abc import Sequence
-from uuid import NAMESPACE_URL, uuid5
-
-from langchain_core.documents import Document
-from langchain_core.embeddings import Embeddings
-from langchain_qdrant import QdrantVectorStore
-from qdrant_client import QdrantClient, models
-
 from common.ai_model import get_embedding_model
-from common.qdrant import get_qdrant_client
+from langchain_qdrant import QdrantVectorStore, RetrievalMode
+from qdrant_client import QdrantClient
+from qdrant_client.models import Distance
+from langchain_chroma import Chroma
+from common.config import QDRANT_URL
+from pathlib import Path
 
+COLLECTION_NAME = "law_doc_chunks"
 
-COLLECTION_NAME = "ai_basic_law_project"
+# Qdrant Vector Store 저장
+def set_vectorstore():
+    from rag.chunker import text_split
+    embeddings = get_embedding_model()
 
+    chunks = text_split()
 
-def _point_id(document: Document) -> str:
-    """재인덱싱 시 같은 청크를 덮어쓰는 안정적인 UUID를 만든다."""
-    source = document.metadata.get("source", "")
-    chunk_id = document.metadata.get("chunk_id", "")
-    return str(uuid5(NAMESPACE_URL, f"{source}#{chunk_id}"))
+    client = QdrantClient(url=QDRANT_URL)
 
+    # Chunking 설정을 수정한 뒤 다시 실습할 때는 True
+    # 기존 컬렉션을 유지하려면 False
+    RESET_DB = False
 
-def get_vector_store(
-    *,
-    collection_name: str = COLLECTION_NAME,
-    client: QdrantClient | None = None,
-    embedding: Embeddings | None = None,
-) -> QdrantVectorStore:
-    """common 설정의 Qdrant client로 기존 collection에 연결한다."""
-    client = client or get_qdrant_client()
-    if not client.collection_exists(collection_name):
-        raise ValueError(
-            f"Qdrant collection이 없습니다: {collection_name}. "
-            "index_documents()를 먼저 실행하세요."
-        )
-    return QdrantVectorStore(
-        client=client,
-        collection_name=collection_name,
-        embedding=embedding or get_embedding_model(),
-        distance=models.Distance.COSINE,
+    if RESET_DB and client.collection_exists(COLLECTION_NAME):
+        client.delete_collection(COLLECTION_NAME)
+        print(f"기존 컬렉션 삭제: {COLLECTION_NAME}")
+
+    vector_store = QdrantVectorStore.from_documents(
+        documents=chunks,
+        embedding=embeddings,
+        collection_name=COLLECTION_NAME,
+        url=QDRANT_URL,
+        distance=Distance.COSINE,
+        retrieval_mode=RetrievalMode.DENSE,
     )
 
-
-def index_documents(
-    documents: Sequence[Document],
-    *,
-    collection_name: str = COLLECTION_NAME,
-    recreate: bool = False,
-    client: QdrantClient | None = None,
-    embedding: Embeddings | None = None,
-) -> QdrantVectorStore:
-    """문서를 cosine-distance Qdrant collection에 upsert한다.
-
-    recreate=True인 경우에만 기존 collection을 삭제하고 다시 만든다.
-    기본값에서는 결정적 point ID를 사용하므로 같은 PDF를 재실행해도 중복되지 않는다.
-    """
-    if not documents:
-        raise ValueError("인덱싱할 문서가 없습니다.")
-
-    client = client or get_qdrant_client()
-    embedding = embedding or get_embedding_model()
-    exists = client.collection_exists(collection_name)
-
-    if recreate and exists:
-        client.delete_collection(collection_name)
-        exists = False
-
-    if not exists:
-        vector_size = len(embedding.embed_query("embedding dimension probe"))
-        client.create_collection(
-            collection_name=collection_name,
-            vectors_config=models.VectorParams(
-                size=vector_size,
-                distance=models.Distance.COSINE,
-            ),
-        )
-
-    vector_store = QdrantVectorStore(
-        client=client,
-        collection_name=collection_name,
-        embedding=embedding,
-        distance=models.Distance.COSINE,
+    print(
+        f"저장된 Chunk 수: "
+        f"{client.count(COLLECTION_NAME, exact=True).count}"
     )
-    vector_store.add_documents(
-        documents=list(documents),
-        ids=[_point_id(document) for document in documents],
-    )
+
     return vector_store
+
+# 기존 Qdrant Vector Store 연결
+def load_vectorstore():
+    embeddings = get_embedding_model()
+
+    client = QdrantClient(url=QDRANT_URL)
+
+    if not client.collection_exists(COLLECTION_NAME):
+        # raise ValueError(
+        #     f"'{COLLECTION_NAME}' 컬렉션이 없습니다. "
+        #     "set_vectorstore()를 먼저 실행하세요."
+        # )
+        return set_vectorstore()
+
+    return QdrantVectorStore.from_existing_collection(
+        embedding=embeddings,
+        collection_name=COLLECTION_NAME,
+        url=QDRANT_URL,
+        retrieval_mode=RetrievalMode.DENSE,
+    )
